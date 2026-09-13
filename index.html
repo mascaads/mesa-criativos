@@ -291,6 +291,7 @@
   <button class="tab" data-view="simples">Simples <span class="tab-n" id="nSimp">0</span></button>
   <button class="tab" data-view="done">Feitos <span class="tab-n" id="nDone">0</span></button>
   <button class="tab" data-view="formats">Formatos <span class="tab-n" id="nFmt">0</span></button>
+  <button class="tab" data-view="experts">Experts <span class="tab-n" id="nExp">0</span></button>
 </nav>
 
 <div id="dbErr" class="db-err hidden">
@@ -331,6 +332,15 @@
       <div id="simpList" class="simp-list"></div>
     </div></div>
   </div>
+
+  <div id="view-experts" class="view hidden">
+    <div class="view-head">
+      <div><h2>Experts</h2><p>Fotos de cada expert (várias por expert, com nome) e o comando/prompt pra gerar variações.</p></div>
+      <div class="spacer"></div>
+      <button class="btn primary" id="addExpBtn"><span class="ic">＋</span> Adicionar expert</button>
+    </div>
+    <div class="grid-wrap"><div class="grid" id="expGrid"></div></div>
+  </div>
 </main>
 
 <div class="scrim" id="scrim"></div>
@@ -365,6 +375,22 @@
 
 <div class="cfm" id="cfm"><div class="cfm-box"><p id="cfmMsg"></p><div class="cfm-acts"><button class="btn" id="cfmNo">Cancelar</button><button class="btn danger-solid" id="cfmYes">Remover</button></div></div></div>
 
+<div class="modal" id="expModal" aria-hidden="true" aria-label="Expert" style="width:min(580px,94vw)">
+  <div class="modal-head"><h2 id="expModalTitle">Expert</h2><div class="spacer"></div><button class="btn danger sm" id="expDelBtn"><span class="ic">🗑</span> Excluir</button><button class="btn ghost" id="expClose" aria-label="Fechar">✕</button></div>
+  <div class="modal-body" id="expBody"></div>
+  <div class="modal-foot"><div class="spacer"></div><button class="btn primary" id="expDone">Fechar</button></div>
+</div>
+
+<style>
+  .exp-badge{position:absolute;bottom:8px;right:8px;font-size:11px;font-weight:700;background:rgba(15,20,28,.72);color:#fff;padding:3px 8px;border-radius:7px}
+  .exp-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:11px;margin-bottom:12px}
+  .exp-photo{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--surface-2);display:flex;flex-direction:column}
+  .exp-photo img{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:var(--surface-3)}
+  .exp-photo .exp-pname{border:none;border-top:1px solid var(--line);border-radius:0;font-size:12px;padding:7px 9px;background:transparent;width:100%}
+  .exp-photo .exp-pacts{display:flex;gap:5px;padding:7px 8px;border-top:1px solid var(--line)}
+  .exp-photo .exp-pacts .btn{flex:1;justify-content:center;padding:5px 4px;font-size:11.5px}
+</style>
+
 <datalist id="fmtNames"></datalist>
 <div class="toast" id="toast"></div>
 
@@ -392,11 +418,11 @@
   var AUDIO_MAX=22*1024*1024, VIDEO_MAX=30*1024*1024, IMG_TARGET=150000, MEDIA_MAX=235000;
   var DL_OK=/\.(gif|png|jpg|jpeg|webp|mp4|webm|txt|json|md|docx|pptx|epub|csv|ttf|html|svg|pdf|xlsx)$/i;
 
-  var db=null, cardsCol=null, formatsCol=null, simplesCol=null, downloadsCap=undefined;
-  var cards={}, formats={}, simples={};
+  var db=null, cardsCol=null, formatsCol=null, simplesCol=null, expertsCol=null, downloadsCap=undefined;
+  var cards={}, formats={}, simples={}, experts={};
   var mediaCache={}, dataUrlCache={}, urlToBlob={};
-  var currentId=null, view="board", currentFmtId=null;
-  var gotCards=false, gotFormats=false, gotSimples=false, uploading=false;
+  var currentId=null, view="board", currentFmtId=null, currentExpId=null;
+  var gotCards=false, gotFormats=false, gotSimples=false, gotExperts=false, uploading=false;
 
   var $=function(s,r){return (r||document).querySelector(s);};
   function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
@@ -430,8 +456,9 @@
   function chip(on,ic,lb,cls){return '<span class="asset '+(on?"on ":"")+(cls||"")+'">'+ic+' '+lb+'</span>';}
 
   /* ---------- render ---------- */
-  function render(){updateCounts();updateFmtDatalist();if(view==="board")renderBoard();else if(view==="done")renderDone();else if(view==="formats")renderFormats();else renderSimples();}
+  function render(){updateCounts();updateFmtDatalist();if(view==="board")renderBoard();else if(view==="done")renderDone();else if(view==="formats")renderFormats();else if(view==="experts")renderExperts();else renderSimples();}
   function updateCounts(){$("#nDone").textContent=gotCards?archivedCards().length:0;$("#nFmt").textContent=gotFormats?formatList().length:0;
+    $("#nExp").textContent=gotExperts?expertList().length:0;
     var pend=0;if(gotSimples)for(var k in simples)if(!simples[k].done)pend++;$("#nSimp").textContent=pend;}
   function simpleList(){var a=[];for(var k in simples)a.push(simples[k]);a.sort(function(x,y){return (x.order||0)-(y.order||0);});return a;}
   function updateFmtDatalist(){$("#fmtNames").innerHTML=formatList().map(function(f){return '<option value="'+esc(f.name)+'">';}).join("");}
@@ -757,10 +784,88 @@
     closeFormatModal();render();}
   function closeFormatModal(){currentFmtId=null;var m=$("#fmtModal");m.classList.remove("open");m.setAttribute("aria-hidden","true");if(!$("#drawer").classList.contains("open"))$("#scrim").classList.remove("open");}
 
+  /* ---------- experts ---------- */
+  function expertList(){var a=[];for(var k in experts)a.push(experts[k]);a.sort(function(x,y){return (x.order||0)-(y.order||0);});return a;}
+  function applyExperts(snap){var next={};snap.docs.forEach(function(d){var v=Object.assign({},d.data());v.id=d.id;next[d.id]=v;});experts=next;gotExperts=true;
+    var load=[];for(var k in experts){if((experts[k].photoCount||0)>0&&mediaCache["expthumb:"+k]===undefined)load.push(k);}
+    render();load.slice(0,60).forEach(function(k){loadExpertThumb(k).then(function(){if(view==="experts")render();});});}
+  function loadExpertThumb(id){var key="expthumb:"+id;if(mediaCache[key]!==undefined)return Promise.resolve(mediaCache[key]);if(!db){mediaCache[key]=null;return Promise.resolve(null);}
+    return db.collection("experts/"+id+"/photos").orderBy("order").limit(1).get().then(function(snap){var v=null;snap.forEach(function(d){if(v===null)v=d.data().data||null;});mediaCache[key]=v;return v;}).catch(function(){mediaCache[key]=null;return null;});}
+  function renderExperts(){
+    var items=gotExperts?expertList():[];var g=$("#expGrid");
+    if(!items.length){g.innerHTML='<div class="empty"><span class="big">🧑‍💼</span><h3>Nenhum expert ainda</h3><p>Clique em <strong>Adicionar expert</strong>, dê um nome, coloque as fotos (pode várias) e escreva o comando/prompt pra gerar variações.</p></div>';return;}
+    g.innerHTML=items.map(function(e){
+      var thumb=mediaCache["expthumb:"+e.id]?'<img src="'+mediaCache["expthumb:"+e.id]+'" alt="">':'<span class="ph">🧑‍💼</span>';
+      var pc=e.photoCount||0;var badge=pc>0?'<span class="exp-badge">'+pc+(pc>1?" fotos":" foto")+'</span>':"";
+      var copyBtn=e.command?'<button class="btn sm" data-copyexp="'+e.id+'">⧉ Copiar comando</button>':"";
+      return '<div class="tile"><div class="media">'+thumb+badge+'</div><div class="body"><h3>'+esc(e.name||"(sem nome)")+'</h3>'+
+        (e.command?'<p>'+esc(e.command)+'</p>':'<p style="color:var(--faint)">sem comando ainda</p>')+
+        '<div class="acts">'+copyBtn+'<button class="btn sm" data-editexp="'+e.id+'">Abrir</button></div></div></div>';
+    }).join("");
+    g.querySelectorAll("[data-editexp]").forEach(function(b){b.addEventListener("click",function(){openExpert(b.getAttribute("data-editexp"));});});
+    g.querySelectorAll("[data-copyexp]").forEach(function(b){b.addEventListener("click",function(ev){ev.stopPropagation();copyCommand(experts[b.getAttribute("data-copyexp")]);});});
+  }
+  function copyCommand(e){if(!e||!e.command){toast("Sem comando pra copiar.");return;}
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(e.command).then(function(){toast("Comando copiado ✓");},function(){toast("Não deu pra copiar automático.");});
+    else toast("Copie manualmente pelo painel.");}
+  function createExpert(){if(!expertsCol){toast("Sem conexão — recarregue a página.");return;}
+    var id=uid("e"),t=now(),mx=0;for(var k in experts)if((experts[k].order||0)>mx)mx=experts[k].order;
+    var data={id:id,name:"",command:"",photoCount:0,order:mx+1000,createdAt:t,updatedAt:t};
+    experts[id]=data;expertsCol.doc(id).set(data).catch(function(e){toast("Erro ao criar: "+(e&&e.code||"?"));});render();openExpert(id);setTimeout(function(){var n=$("#exp_name");if(n)n.focus();},250);}
+  function patchExpert(id,fields){if(!experts[id])return;Object.assign(experts[id],fields);experts[id].updatedAt=now();
+    if(expertsCol)expertsCol.doc(id).set(experts[id]).catch(function(e){toast("Erro ao salvar: "+(e&&e.code||"?"));});}
+  function deleteExpert(id){delete experts[id];delete mediaCache["expthumb:"+id];
+    if(expertsCol){db.collection("experts/"+id+"/photos").get().then(function(snap){snap.forEach(function(d){d.ref.delete().catch(function(){});});}).catch(function(){});expertsCol.doc(id).delete().catch(function(){});}
+    closeExpertModal();render();}
+  function openExpert(id){var e=experts[id];if(!e)return;currentExpId=id;
+    $("#expBody").innerHTML=
+      '<div class="field"><input id="exp_name" class="in title-in" placeholder="Nome do expert…" value="'+esc(e.name||"")+'"></div>'+
+      '<div class="field"><label>⧉ Comando / prompt (pra gerar variações)</label>'+
+        '<textarea id="exp_cmd" class="in" placeholder="Escreva aqui o prompt que você usa pra gerar variações deste expert…" style="min-height:120px">'+esc(e.command||"")+'</textarea>'+
+        '<button class="btn primary sm" id="exp_copy" style="margin-top:9px"><span class="ic">⧉</span> Copiar comando</button></div>'+
+      '<div class="field"><label>🖼 Fotos do expert (variações)</label><div id="exp_photos" class="exp-photos"></div>'+
+        '<label class="drop" id="exp_drop"><span class="big">🖼️</span><span class="t">Adicionar foto(s)</span><span class="s">pode selecionar várias de uma vez · dá pra nomear e baixar cada uma</span><input type="file" accept="image/*" multiple id="exp_files" class="sr-only"></label></div>';
+    wireExpert(id);loadExpertPhotos(id);
+    $("#scrim").classList.add("open");var m=$("#expModal");m.classList.add("open");m.setAttribute("aria-hidden","false");}
+  function wireExpert(id){
+    var d1;$("#exp_name").addEventListener("input",function(){var v=this.value;clearTimeout(d1);d1=setTimeout(function(){patchExpert(id,{name:v});render();},450);});
+    var d2;$("#exp_cmd").addEventListener("input",function(){var v=this.value;clearTimeout(d2);d2=setTimeout(function(){patchExpert(id,{command:v});render();},450);});
+    $("#exp_copy").addEventListener("click",function(){copyCommand(experts[id]);});
+    var fi=$("#exp_files");fi.addEventListener("change",function(){if(fi.files&&fi.files.length)addExpertPhotos(id,fi.files);fi.value="";});
+    var drop=$("#exp_drop");
+    ["dragenter","dragover"].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add("over");});});
+    ["dragleave","drop"].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove("over");});});
+    drop.addEventListener("drop",function(e){var fs=e.dataTransfer.files;if(fs&&fs.length)addExpertPhotos(id,fs);});}
+  function loadExpertPhotos(id){var slot=$("#exp_photos");if(!slot)return;slot.innerHTML='<div class="prog"><div class="lbl">carregando fotos… ⏳</div></div>';
+    db.collection("experts/"+id+"/photos").get().then(function(snap){if(currentExpId!==id)return;
+      var ps=[];snap.forEach(function(d){var v=d.data();v.id=d.id;ps.push(v);});ps.sort(function(a,b){return (a.order||0)-(b.order||0);});
+      if(!ps.length){slot.innerHTML='<p style="color:var(--faint);font-size:12.5px;margin:0 0 6px">Nenhuma foto ainda — adicione abaixo. 👇</p>';return;}
+      slot.innerHTML=ps.map(photoHTML).join("");wirePhotos(id,slot);
+    }).catch(function(e){slot.innerHTML='<p style="color:var(--danger);font-size:12.5px">Erro ao carregar fotos: '+(e&&(e.code||e.message)||"?")+'</p>';});}
+  function photoHTML(p){return '<div class="exp-photo" data-pid="'+p.id+'"><img src="'+p.data+'" alt=""><input class="exp-pname" data-pname="'+p.id+'" value="'+esc(p.name||"")+'" placeholder="Nome da imagem"><div class="exp-pacts"><button class="btn sm" data-pdl="'+p.id+'"><span class="ic">⬇</span> Baixar</button><button class="btn danger sm" data-prm="'+p.id+'">🗑</button></div></div>';}
+  function wirePhotos(id,slot){
+    slot.querySelectorAll("[data-pname]").forEach(function(inp){inp.addEventListener("change",function(){db.collection("experts/"+id+"/photos").doc(inp.getAttribute("data-pname")).set({name:inp.value},{merge:true}).catch(function(){});});});
+    slot.querySelectorAll("[data-pdl]").forEach(function(b){b.addEventListener("click",function(){var pid=b.getAttribute("data-pdl");var img=slot.querySelector('.exp-photo[data-pid="'+pid+'"] img');var nm=slot.querySelector('[data-pname="'+pid+'"]');if(img)offerDownload(img.getAttribute("src"),((nm&&nm.value)||"foto").replace(/[\\/:*?"<>|]/g,"")+".jpg");});});
+    slot.querySelectorAll("[data-prm]").forEach(function(b){b.addEventListener("click",function(){var pid=b.getAttribute("data-prm");confirmAction("Remover esta foto?","Remover",function(){removeExpertPhoto(id,pid);});});});}
+  function addExpertPhotos(id,files){var arr=[].slice.call(files);if(!arr.length)return;
+    toast("Enviando "+arr.length+" foto(s)…");var i=0,added=0;
+    (function nextFile(){
+      if(i>=arr.length){if(added){patchExpert(id,{photoCount:(experts[id].photoCount||0)+added});delete mediaCache["expthumb:"+id];}if(currentExpId===id)loadExpertPhotos(id);render();if(added)toast(added+" foto(s) adicionada(s) ✓");return;}
+      var file=arr[i++];
+      compressImage(file).then(function(uri){if(uri.length>MEDIA_MAX){toast("Uma imagem muito grande foi pulada.");return nextFile();}
+        var pid=uid("p");var pdata={id:pid,name:(file.name||"foto").replace(/\.[^.]+$/,""),data:uri,order:now()*1000+i,createdAt:now()};
+        db.collection("experts/"+id+"/photos").doc(pid).set(pdata).then(function(){added++;nextFile();}).catch(function(e){toast("Erro ao salvar foto ("+(e&&e.code||"?")+").");nextFile();});
+      }).catch(function(){toast("Não deu pra processar uma imagem.");nextFile();});
+    })();}
+  function removeExpertPhoto(id,pid){db.collection("experts/"+id+"/photos").doc(pid).delete().catch(function(){});
+    patchExpert(id,{photoCount:Math.max(0,(experts[id].photoCount||1)-1)});delete mediaCache["expthumb:"+id];
+    if(currentExpId===id)loadExpertPhotos(id);render();}
+  function closeExpertModal(){currentExpId=null;var m=$("#expModal");m.classList.remove("open");m.setAttribute("aria-hidden","true");if(!$("#drawer").classList.contains("open"))$("#scrim").classList.remove("open");}
+
   /* ---------- views + static ---------- */
   function switchView(v){view=v;if($("#drawer").classList.contains("open"))closeDrawer();
     document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("active",t.getAttribute("data-view")===v);});
-    $("#view-board").classList.toggle("hidden",v!=="board");$("#view-done").classList.toggle("hidden",v!=="done");$("#view-formats").classList.toggle("hidden",v!=="formats");$("#view-simples").classList.toggle("hidden",v!=="simples");render();}
+    $("#view-board").classList.toggle("hidden",v!=="board");$("#view-done").classList.toggle("hidden",v!=="done");$("#view-formats").classList.toggle("hidden",v!=="formats");$("#view-simples").classList.toggle("hidden",v!=="simples");$("#view-experts").classList.toggle("hidden",v!=="experts");render();}
   document.querySelectorAll(".tab").forEach(function(t){
     t.addEventListener("click",function(){switchView(t.getAttribute("data-view"));});
     if(t.getAttribute("data-view")==="done"){
@@ -771,6 +876,9 @@
 
   $("#newBtn").addEventListener("click",function(){if(view!=="board")switchView("board");createCard("todo");});
   $("#addFmtBtn").addEventListener("click",function(){openFormatModal(null);});
+  $("#addExpBtn").addEventListener("click",function(){createExpert();});
+  $("#expClose").addEventListener("click",closeExpertModal);$("#expDone").addEventListener("click",closeExpertModal);
+  $("#expDelBtn").addEventListener("click",function(){if(!currentExpId)return;var id=currentExpId;confirmAction("Excluir este expert e todas as fotos? Não volta.","Excluir",function(){deleteExpert(id);});});
   if($("#simpDate"))$("#simpDate").value=todayStr();
   $("#simpAdd").addEventListener("click",function(){var i=$("#simpInput"),d=$("#simpDate");createSimple(i.value,d.value);i.value="";d.value=todayStr();i.focus();});
   $("#simpInput").addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();var d=$("#simpDate");createSimple(this.value,d.value);this.value="";d.value=todayStr();}});
@@ -783,8 +891,8 @@
   $("#cfmNo").addEventListener("click",closeConfirm);
   $("#cfm").addEventListener("click",function(e){if(e.target===$("#cfm"))closeConfirm();});
   $("#cfmYes").addEventListener("click",function(){var fn=window._cfmYes;closeConfirm();if(typeof fn==="function")fn();});
-  $("#scrim").addEventListener("click",function(){if($("#fmtModal").classList.contains("open"))closeFormatModal();else closeDrawer();});
-  document.addEventListener("keydown",function(e){if(e.key==="Escape"){if($("#cfm").classList.contains("open"))closeConfirm();else if($("#vmodal").classList.contains("open"))closeVideo();else if($("#fmtModal").classList.contains("open"))closeFormatModal();else if(currentId)closeDrawer();}});
+  $("#scrim").addEventListener("click",function(){if($("#expModal").classList.contains("open"))closeExpertModal();else if($("#fmtModal").classList.contains("open"))closeFormatModal();else closeDrawer();});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"){if($("#cfm").classList.contains("open"))closeConfirm();else if($("#vmodal").classList.contains("open"))closeVideo();else if($("#expModal").classList.contains("open"))closeExpertModal();else if($("#fmtModal").classList.contains("open"))closeFormatModal();else if(currentId)closeDrawer();}});
   $("#shareBtn").addEventListener("click",function(){var url=location.href;if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(function(){toast("Link copiado — envie pro seu editor 📨");},function(){toast(url);});else toast(url);});
 
   /* ---------- boot ---------- */
@@ -806,6 +914,7 @@
     cardsCol.get().then(function(s){okC=true;applyCards(s);if(okC&&okF)hideDbErr();}).catch(function(e){showDbErr("Erro ao carregar criativos: "+(e&&(e.code||e.message)||String(e))+" — toque em ↻ Tentar de novo.");});
     formatsCol.get().then(function(s){okF=true;applyFormats(s);if(okC&&okF)hideDbErr();}).catch(function(e){showDbErr("Erro ao carregar formatos: "+(e&&(e.code||e.message)||String(e)));});
     if(simplesCol)simplesCol.get().then(applySimples).catch(function(){});
+    if(expertsCol)expertsCol.get().then(applyExperts).catch(function(){});
   }
   function bootDB(){
     setConn("connecting");hideDbErr();
@@ -813,7 +922,7 @@
     try{
       if(!firebase.apps.length)firebase.initializeApp(FBCONFIG);
       db=firebase.firestore();
-      cardsCol=db.collection("cards");formatsCol=db.collection("formats");simplesCol=db.collection("simples");
+      cardsCol=db.collection("cards");formatsCol=db.collection("formats");simplesCol=db.collection("simples");expertsCol=db.collection("experts");
     }catch(e){setConn("offline");showDbErr("Falha ao iniciar o Firebase: "+(e&&e.message||e));return;}
     setConn("live");hideDbErr();
     loadAll();
@@ -821,6 +930,7 @@
       cardsCol.onSnapshot(applyCards,function(e){showDbErr("Erro de conexão: "+(e&&(e.code||e.message)||"?")+" — verifique as Regras do Firestore.");});
       formatsCol.onSnapshot(applyFormats,function(){});
       simplesCol.onSnapshot(applySimples,function(){});
+      expertsCol.onSnapshot(applyExperts,function(){});
     }catch(e){}
   }
   $("#dbRetry").addEventListener("click",function(){if(db)loadAll();else bootDB();});

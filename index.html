@@ -335,11 +335,16 @@
 
   <div id="view-experts" class="view hidden">
     <div class="view-head">
-      <div><h2>Experts</h2><p>Fotos de cada expert (várias por expert, com nome) e o comando/prompt pra gerar variações.</p></div>
-      <div class="spacer"></div>
-      <button class="btn primary" id="addExpBtn"><span class="ic">＋</span> Adicionar expert</button>
+      <div><h2>Experts</h2><p>Comandos/prompts pra gerar variações e a biblioteca de experts com fotos.</p></div>
     </div>
-    <div class="grid-wrap"><div class="grid" id="expGrid"></div></div>
+    <div class="grid-wrap">
+      <div class="cmd-panel">
+        <div class="cmd-head"><h3>⧉ Comandos / prompts</h3><div class="spacer"></div><button class="btn sm" id="addCmdBtn"><span class="ic">＋</span> Adicionar comando</button></div>
+        <div id="cmdList" class="cmd-list"></div>
+      </div>
+      <div class="cmd-head" style="margin:22px 0 4px"><h3>🧑‍💼 Experts</h3><div class="spacer"></div><button class="btn primary" id="addExpBtn"><span class="ic">＋</span> Adicionar expert</button></div>
+      <div class="grid" id="expGrid"></div>
+    </div>
   </div>
 </main>
 
@@ -389,6 +394,17 @@
   .exp-photo .exp-pname{border:none;border-top:1px solid var(--line);border-radius:0;font-size:12px;padding:7px 9px;background:transparent;width:100%}
   .exp-photo .exp-pacts{display:flex;gap:5px;padding:7px 8px;border-top:1px solid var(--line)}
   .exp-photo .exp-pacts .btn{flex:1;justify-content:center;padding:5px 4px;font-size:11.5px}
+  .cmd-panel{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius);padding:15px 16px}
+  .cmd-head{display:flex;align-items:center;gap:10px}
+  .cmd-head h3{font-size:14.5px;font-weight:700}
+  .cmd-list{display:flex;flex-direction:column;gap:11px;margin-top:13px}
+  .cmd-item{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:11px;padding:11px 12px;box-shadow:var(--shadow-sm)}
+  .cmd-name{width:100%;border:none;background:transparent;font-size:14px;font-weight:700;color:var(--ink);padding:2px 0;margin-bottom:6px}
+  .cmd-name:focus{outline:none}
+  .cmd-text{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;color:var(--ink);line-height:1.5;resize:vertical;min-height:70px;font-family:"IBM Plex Mono",ui-monospace,monospace}
+  .cmd-text:focus{outline:none;border-color:var(--accent);background:var(--surface)}
+  .cmd-acts{display:flex;gap:7px;margin-top:9px}
+  .cmd-empty{color:var(--faint);font-size:13px;margin:4px 0 0}
 </style>
 
 <datalist id="fmtNames"></datalist>
@@ -418,11 +434,11 @@
   var AUDIO_MAX=22*1024*1024, VIDEO_MAX=30*1024*1024, IMG_TARGET=150000, MEDIA_MAX=235000;
   var DL_OK=/\.(gif|png|jpg|jpeg|webp|mp4|webm|txt|json|md|docx|pptx|epub|csv|ttf|html|svg|pdf|xlsx)$/i;
 
-  var db=null, cardsCol=null, formatsCol=null, simplesCol=null, expertsCol=null, downloadsCap=undefined;
-  var cards={}, formats={}, simples={}, experts={};
+  var db=null, cardsCol=null, formatsCol=null, simplesCol=null, expertsCol=null, commandsCol=null, downloadsCap=undefined;
+  var cards={}, formats={}, simples={}, experts={}, commands={};
   var mediaCache={}, dataUrlCache={}, urlToBlob={};
   var currentId=null, view="board", currentFmtId=null, currentExpId=null;
-  var gotCards=false, gotFormats=false, gotSimples=false, gotExperts=false, uploading=false;
+  var gotCards=false, gotFormats=false, gotSimples=false, gotExperts=false, gotCommands=false, uploading=false, _cmdSig="";
 
   var $=function(s,r){return (r||document).querySelector(s);};
   function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
@@ -792,25 +808,53 @@
   function loadExpertThumb(id){var key="expthumb:"+id;if(mediaCache[key]!==undefined)return Promise.resolve(mediaCache[key]);if(!db){mediaCache[key]=null;return Promise.resolve(null);}
     return db.collection("experts/"+id+"/photos").orderBy("order").limit(1).get().then(function(snap){var v=null;snap.forEach(function(d){if(v===null)v=d.data().data||null;});mediaCache[key]=v;return v;}).catch(function(){mediaCache[key]=null;return null;});}
   function renderExperts(){
+    renderCommands();
     var items=gotExperts?expertList():[];var g=$("#expGrid");
-    if(!items.length){g.innerHTML='<div class="empty"><span class="big">🧑‍💼</span><h3>Nenhum expert ainda</h3><p>Clique em <strong>Adicionar expert</strong>, dê um nome, coloque as fotos (pode várias) e escreva o comando/prompt pra gerar variações.</p></div>';return;}
+    if(!items.length){g.innerHTML='<div class="empty"><span class="big">🧑‍💼</span><h3>Nenhum expert ainda</h3><p>Clique em <strong>Adicionar expert</strong>, dê um nome e coloque as fotos (pode várias, com nome e download).</p></div>';return;}
     g.innerHTML=items.map(function(e){
       var thumb=mediaCache["expthumb:"+e.id]?'<img src="'+mediaCache["expthumb:"+e.id]+'" alt="">':'<span class="ph">🧑‍💼</span>';
       var pc=e.photoCount||0;var badge=pc>0?'<span class="exp-badge">'+pc+(pc>1?" fotos":" foto")+'</span>':"";
-      var copyBtn=e.command?'<button class="btn sm" data-copyexp="'+e.id+'">⧉ Copiar comando</button>':"";
       return '<div class="tile"><div class="media">'+thumb+badge+'</div><div class="body"><h3>'+esc(e.name||"(sem nome)")+'</h3>'+
-        (e.command?'<p>'+esc(e.command)+'</p>':'<p style="color:var(--faint)">sem comando ainda</p>')+
-        '<div class="acts">'+copyBtn+'<button class="btn sm" data-editexp="'+e.id+'">Abrir</button></div></div></div>';
+        '<p style="color:var(--muted)">'+(pc>0?pc+(pc>1?" variações":" variação"):"sem fotos ainda")+'</p>'+
+        '<div class="acts"><button class="btn sm" data-editexp="'+e.id+'">Abrir</button></div></div></div>';
     }).join("");
     g.querySelectorAll("[data-editexp]").forEach(function(b){b.addEventListener("click",function(){openExpert(b.getAttribute("data-editexp"));});});
-    g.querySelectorAll("[data-copyexp]").forEach(function(b){b.addEventListener("click",function(ev){ev.stopPropagation();copyCommand(experts[b.getAttribute("data-copyexp")]);});});
   }
-  function copyCommand(e){if(!e||!e.command){toast("Sem comando pra copiar.");return;}
-    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(e.command).then(function(){toast("Comando copiado ✓");},function(){toast("Não deu pra copiar automático.");});
-    else toast("Copie manualmente pelo painel.");}
+  function copyText(t){if(!t||!t.trim()){toast("Está vazio — nada pra copiar.");return;}
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(function(){toast("Comando copiado ✓");},function(){toast("Não deu pra copiar automático.");});
+    else toast("Não deu pra copiar automático.");}
+
+  /* ---------- comandos / prompts (área própria dos Experts) ---------- */
+  function commandList(){var a=[];for(var k in commands)a.push(commands[k]);a.sort(function(x,y){return (x.order||0)-(y.order||0);});return a;}
+  function applyCommands(snap){var next={};snap.docs.forEach(function(d){var v=Object.assign({},d.data());v.id=d.id;next[d.id]=v;});commands=next;gotCommands=true;if(view==="experts")renderCommands();}
+  function renderCommands(){
+    var box=$("#cmdList");if(!box)return;
+    var items=gotCommands?commandList():[];
+    var sig=items.map(function(c){return c.id;}).join(",");
+    if(sig===_cmdSig&&box.childElementCount)return; // não reconstrói enquanto você digita
+    _cmdSig=sig;
+    if(!items.length){box.innerHTML='<p class="cmd-empty">Nenhum comando salvo. Clique em ＋ Adicionar comando pra guardar um prompt e copiar quando quiser.</p>';return;}
+    box.innerHTML=items.map(cmdHTML).join("");wireCommands(box);
+  }
+  function cmdHTML(c){return '<div class="cmd-item" data-cid="'+c.id+'"><input class="cmd-name" data-cname="'+c.id+'" value="'+esc(c.name||"")+'" placeholder="Nome do comando (ex: variação UGC)"><textarea class="cmd-text" data-ctext="'+c.id+'" placeholder="Escreva o prompt aqui…">'+esc(c.text||"")+'</textarea><div class="cmd-acts"><button class="btn primary sm" data-ccopy="'+c.id+'"><span class="ic">⧉</span> Copiar</button><button class="btn danger sm" data-cdel="'+c.id+'"><span class="ic">🗑</span> Remover</button></div></div>';}
+  function wireCommands(box){
+    var deb={};
+    box.querySelectorAll("[data-cname]").forEach(function(inp){inp.addEventListener("input",function(){var id=inp.getAttribute("data-cname"),v=inp.value;clearTimeout(deb["n"+id]);deb["n"+id]=setTimeout(function(){patchCommand(id,{name:v});},450);});});
+    box.querySelectorAll("[data-ctext]").forEach(function(tx){tx.addEventListener("input",function(){var id=tx.getAttribute("data-ctext"),v=tx.value;clearTimeout(deb["t"+id]);deb["t"+id]=setTimeout(function(){patchCommand(id,{text:v});},450);});});
+    box.querySelectorAll("[data-ccopy]").forEach(function(b){b.addEventListener("click",function(){var tx=box.querySelector('[data-ctext="'+b.getAttribute("data-ccopy")+'"]');copyText(tx?tx.value:"");});});
+    box.querySelectorAll("[data-cdel]").forEach(function(b){b.addEventListener("click",function(){var id=b.getAttribute("data-cdel");confirmAction("Remover este comando?","Remover",function(){deleteCommand(id);});});});
+  }
+  function createCommand(){if(!commandsCol){toast("Sem conexão — recarregue a página.");return;}
+    var id=uid("cmd"),t=now(),mx=0;for(var k in commands)if((commands[k].order||0)>mx)mx=commands[k].order;
+    var data={id:id,name:"",text:"",order:mx+1000,createdAt:t,updatedAt:t};
+    commands[id]=data;commandsCol.doc(id).set(data).catch(function(e){toast("Erro ao criar: "+(e&&e.code||"?"));});
+    _cmdSig="";renderCommands();setTimeout(function(){var tx=$('[data-ctext="'+id+'"]');if(tx)tx.focus();},80);}
+  function patchCommand(id,fields){if(!commands[id])return;Object.assign(commands[id],fields);commands[id].updatedAt=now();
+    if(commandsCol)commandsCol.doc(id).set(commands[id]).catch(function(e){toast("Erro ao salvar: "+(e&&e.code||"?"));});}
+  function deleteCommand(id){delete commands[id];if(commandsCol)commandsCol.doc(id).delete().catch(function(){});_cmdSig="";renderCommands();}
   function createExpert(){if(!expertsCol){toast("Sem conexão — recarregue a página.");return;}
     var id=uid("e"),t=now(),mx=0;for(var k in experts)if((experts[k].order||0)>mx)mx=experts[k].order;
-    var data={id:id,name:"",command:"",photoCount:0,order:mx+1000,createdAt:t,updatedAt:t};
+    var data={id:id,name:"",photoCount:0,order:mx+1000,createdAt:t,updatedAt:t};
     experts[id]=data;expertsCol.doc(id).set(data).catch(function(e){toast("Erro ao criar: "+(e&&e.code||"?"));});render();openExpert(id);setTimeout(function(){var n=$("#exp_name");if(n)n.focus();},250);}
   function patchExpert(id,fields){if(!experts[id])return;Object.assign(experts[id],fields);experts[id].updatedAt=now();
     if(expertsCol)expertsCol.doc(id).set(experts[id]).catch(function(e){toast("Erro ao salvar: "+(e&&e.code||"?"));});}
@@ -820,17 +864,12 @@
   function openExpert(id){var e=experts[id];if(!e)return;currentExpId=id;
     $("#expBody").innerHTML=
       '<div class="field"><input id="exp_name" class="in title-in" placeholder="Nome do expert…" value="'+esc(e.name||"")+'"></div>'+
-      '<div class="field"><label>⧉ Comando / prompt (pra gerar variações)</label>'+
-        '<textarea id="exp_cmd" class="in" placeholder="Escreva aqui o prompt que você usa pra gerar variações deste expert…" style="min-height:120px">'+esc(e.command||"")+'</textarea>'+
-        '<button class="btn primary sm" id="exp_copy" style="margin-top:9px"><span class="ic">⧉</span> Copiar comando</button></div>'+
       '<div class="field"><label>🖼 Fotos do expert (variações)</label><div id="exp_photos" class="exp-photos"></div>'+
         '<label class="drop" id="exp_drop"><span class="big">🖼️</span><span class="t">Adicionar foto(s)</span><span class="s">pode selecionar várias de uma vez · dá pra nomear e baixar cada uma</span><input type="file" accept="image/*" multiple id="exp_files" class="sr-only"></label></div>';
     wireExpert(id);loadExpertPhotos(id);
     $("#scrim").classList.add("open");var m=$("#expModal");m.classList.add("open");m.setAttribute("aria-hidden","false");}
   function wireExpert(id){
     var d1;$("#exp_name").addEventListener("input",function(){var v=this.value;clearTimeout(d1);d1=setTimeout(function(){patchExpert(id,{name:v});render();},450);});
-    var d2;$("#exp_cmd").addEventListener("input",function(){var v=this.value;clearTimeout(d2);d2=setTimeout(function(){patchExpert(id,{command:v});render();},450);});
-    $("#exp_copy").addEventListener("click",function(){copyCommand(experts[id]);});
     var fi=$("#exp_files");fi.addEventListener("change",function(){if(fi.files&&fi.files.length)addExpertPhotos(id,fi.files);fi.value="";});
     var drop=$("#exp_drop");
     ["dragenter","dragover"].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add("over");});});
@@ -877,6 +916,7 @@
   $("#newBtn").addEventListener("click",function(){if(view!=="board")switchView("board");createCard("todo");});
   $("#addFmtBtn").addEventListener("click",function(){openFormatModal(null);});
   $("#addExpBtn").addEventListener("click",function(){createExpert();});
+  $("#addCmdBtn").addEventListener("click",function(){createCommand();});
   $("#expClose").addEventListener("click",closeExpertModal);$("#expDone").addEventListener("click",closeExpertModal);
   $("#expDelBtn").addEventListener("click",function(){if(!currentExpId)return;var id=currentExpId;confirmAction("Excluir este expert e todas as fotos? Não volta.","Excluir",function(){deleteExpert(id);});});
   if($("#simpDate"))$("#simpDate").value=todayStr();
@@ -915,6 +955,7 @@
     formatsCol.get().then(function(s){okF=true;applyFormats(s);if(okC&&okF)hideDbErr();}).catch(function(e){showDbErr("Erro ao carregar formatos: "+(e&&(e.code||e.message)||String(e)));});
     if(simplesCol)simplesCol.get().then(applySimples).catch(function(){});
     if(expertsCol)expertsCol.get().then(applyExperts).catch(function(){});
+    if(commandsCol)commandsCol.get().then(applyCommands).catch(function(){});
   }
   function bootDB(){
     setConn("connecting");hideDbErr();
@@ -922,7 +963,7 @@
     try{
       if(!firebase.apps.length)firebase.initializeApp(FBCONFIG);
       db=firebase.firestore();
-      cardsCol=db.collection("cards");formatsCol=db.collection("formats");simplesCol=db.collection("simples");expertsCol=db.collection("experts");
+      cardsCol=db.collection("cards");formatsCol=db.collection("formats");simplesCol=db.collection("simples");expertsCol=db.collection("experts");commandsCol=db.collection("commands");
     }catch(e){setConn("offline");showDbErr("Falha ao iniciar o Firebase: "+(e&&e.message||e));return;}
     setConn("live");hideDbErr();
     loadAll();
@@ -931,6 +972,7 @@
       formatsCol.onSnapshot(applyFormats,function(){});
       simplesCol.onSnapshot(applySimples,function(){});
       expertsCol.onSnapshot(applyExperts,function(){});
+      commandsCol.onSnapshot(applyCommands,function(){});
     }catch(e){}
   }
   $("#dbRetry").addEventListener("click",function(){if(db)loadAll();else bootDB();});

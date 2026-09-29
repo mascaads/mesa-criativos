@@ -923,12 +923,14 @@
     var cmds=commandList();var body=$("#varBody");
     if(!cmds.length){body.innerHTML='<p style="color:var(--muted);font-size:13.5px">Você ainda não tem nenhum <strong>comando/prompt</strong> salvo. Crie um lá em cima em “⧉ Comandos / prompts” e volte aqui pra criar a variação. 🙂</p>';}
     else{
-      body.innerHTML='<div class="field"><label>Foto do expert</label><div class="var-photos" id="varPhotos"><span style="font-size:12px;color:var(--faint)">carregando…</span></div></div>'+
-        '<div class="field"><label>Escolha o comando pra gerar a variação</label><div class="var-cmds" id="varCmds">'+
+      body.innerHTML='<div class="field"><label>Foto do expert</label><div class="var-photos" id="varPhotos"><span style="font-size:12px;color:var(--faint)">carregando…</span></div>'+
+          '<button class="btn sm" id="varCopyBtn" style="margin-top:2px"><span class="ic">📋</span> Copiar só a foto</button></div>'+
+        '<div class="field"><label>Ou escolha um comando: copia a foto + abre o ChatGPT com o prompt</label><div class="var-cmds" id="varCmds">'+
           cmds.map(function(c){return '<button class="btn var-cmd" data-vcmd="'+c.id+'"><span class="ic">▶</span> '+esc(c.name||"(sem nome)")+'</button>';}).join("")+
         '</div></div>'+
-        '<p style="font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.5">Ao escolher, eu <strong>copio a foto</strong> e abro o ChatGPT já com o prompt. Lá, cole a foto com <strong>Cmd/Ctrl + V</strong> e envie. <br><span style="color:var(--faint)">(O ChatGPT não deixa anexar imagem por link, por isso vai colada da área de transferência.)</span></p>';
+        '<p style="font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.5">No ChatGPT, cole a foto com <strong>Cmd/Ctrl + V</strong> e envie. <br><span style="color:var(--faint)">(O ChatGPT não aceita imagem por link — por isso ela vai pela área de transferência.)</span></p>';
       loadVarPhotos(id);
+      $("#varCopyBtn").addEventListener("click",copyPhotoNow);
       $("#varCmds").querySelectorAll("[data-vcmd]").forEach(function(b){b.addEventListener("click",function(){doVariation(commands[b.getAttribute("data-vcmd")]);});});
     }
     $("#scrim").classList.add("open");var m=$("#varModal");m.classList.add("open");m.setAttribute("aria-hidden","false");}
@@ -942,11 +944,18 @@
       slot.querySelectorAll("[data-vphoto]").forEach(function(b){b.addEventListener("click",function(){slot.querySelectorAll(".var-photo").forEach(function(x){x.classList.remove("sel");});b.classList.add("sel");var f=ps.find(function(x){return x.id===b.getAttribute("data-vphoto");});if(f)pick(f.data);});});
     }).catch(function(){slot.innerHTML='<span style="color:var(--danger);font-size:12.5px">Erro ao carregar fotos.</span>';});}
   function doVariation(cmd){if(!cmd||!cmd.text||!cmd.text.trim()){toast("Esse comando está vazio — escreva o prompt primeiro.");return;}
-    var copied=false;
-    try{if(window._varBlob&&navigator.clipboard&&window.ClipboardItem){navigator.clipboard.write([new ClipboardItem({"image/png":window._varBlob})]);copied=true;}}catch(e){copied=false;}
-    window.open("https://chatgpt.com/?q="+encodeURIComponent(cmd.text),"_blank","noopener");
-    toast(copied?"Foto copiada ✓ — no ChatGPT cole (Cmd/Ctrl+V) e envie":"ChatGPT aberto. Anexe a foto manualmente (baixe em “Abrir”).");
-    closeVariation();}
+    var photo=window._varPhoto;var url="https://chatgpt.com/?q="+encodeURIComponent(cmd.text);
+    function openGpt(ok){window.open(url,"_blank","noopener");toast(ok?"Foto copiada ✓ — no ChatGPT cole com Cmd/Ctrl+V e envie":"Abri o ChatGPT. A foto não copiou — use “📋 Copiar foto” ou baixe em “Abrir”.");closeVariation();}
+    if(photo&&navigator.clipboard&&window.ClipboardItem){
+      dataURItoPngBlob(photo).then(function(blob){
+        if(!blob)return openGpt(false);
+        navigator.clipboard.write([new ClipboardItem({"image/png":blob})]).then(function(){openGpt(true);},function(){openGpt(false);});
+      });
+    }else openGpt(false);}
+  function copyPhotoNow(){var photo=window._varPhoto;if(!photo){toast("Selecione uma foto primeiro.");return;}
+    if(!(navigator.clipboard&&window.ClipboardItem)){toast("Seu navegador não deixa copiar imagem — use o Chrome, ou baixe a foto em “Abrir”.");return;}
+    dataURItoPngBlob(photo).then(function(blob){if(!blob){toast("Não deu pra preparar a imagem.");return;}
+      navigator.clipboard.write([new ClipboardItem({"image/png":blob})]).then(function(){toast("Foto copiada ✓ — cole com Cmd/Ctrl+V");},function(){toast("Não consegui copiar aqui. Baixe a foto em “Abrir”.");});});}
   function closeVariation(){currentVarId=null;var m=$("#varModal");m.classList.remove("open");m.setAttribute("aria-hidden","true");if(!$("#drawer").classList.contains("open")&&!$("#expModal").classList.contains("open"))$("#scrim").classList.remove("open");}
 
   /* ---------- views + static ---------- */

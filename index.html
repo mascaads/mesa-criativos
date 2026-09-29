@@ -386,6 +386,11 @@
   <div class="modal-foot"><div class="spacer"></div><button class="btn primary" id="expDone">Fechar</button></div>
 </div>
 
+<div class="modal" id="varModal" aria-hidden="true" aria-label="Criar variação" style="width:min(520px,94vw)">
+  <div class="modal-head"><h2 id="varTitle">Criar variação</h2><div class="spacer"></div><button class="btn ghost" id="varClose" aria-label="Fechar">✕</button></div>
+  <div class="modal-body" id="varBody"></div>
+</div>
+
 <style>
   .exp-badge{position:absolute;bottom:8px;right:8px;font-size:11px;font-weight:700;background:rgba(15,20,28,.72);color:#fff;padding:3px 8px;border-radius:7px}
   .exp-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:11px;margin-bottom:12px}
@@ -405,6 +410,15 @@
   .cmd-text:focus{outline:none;border-color:var(--accent);background:var(--surface)}
   .cmd-acts{display:flex;gap:7px;margin-top:9px}
   .cmd-empty{color:var(--faint);font-size:13px;margin:4px 0 0}
+  .exp-media{position:relative;background:var(--surface-3);display:grid;place-items:center;min-height:120px}
+  .exp-media img{width:100%;height:auto;max-height:560px;object-fit:contain;display:block}
+  .exp-media .ph{font-size:42px;padding:46px;color:var(--faint)}
+  .var-photos{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 4px}
+  .var-photo{width:74px;height:74px;border-radius:10px;overflow:hidden;border:2px solid var(--line);cursor:pointer;flex:0 0 auto;padding:0;background:var(--surface-2)}
+  .var-photo.sel{border-color:var(--accent)}
+  .var-photo img{width:100%;height:100%;object-fit:cover;display:block}
+  .var-cmds{display:flex;flex-direction:column;gap:8px}
+  .var-cmd{text-align:left;justify-content:flex-start;width:100%}
 </style>
 
 <datalist id="fmtNames"></datalist>
@@ -437,7 +451,7 @@
   var db=null, cardsCol=null, formatsCol=null, simplesCol=null, expertsCol=null, commandsCol=null, downloadsCap=undefined;
   var cards={}, formats={}, simples={}, experts={}, commands={};
   var mediaCache={}, dataUrlCache={}, urlToBlob={};
-  var currentId=null, view="board", currentFmtId=null, currentExpId=null;
+  var currentId=null, view="board", currentFmtId=null, currentExpId=null, currentVarId=null;
   var gotCards=false, gotFormats=false, gotSimples=false, gotExperts=false, gotCommands=false, uploading=false, _cmdSig="";
 
   var $=function(s,r){return (r||document).querySelector(s);};
@@ -814,11 +828,12 @@
     g.innerHTML=items.map(function(e){
       var thumb=mediaCache["expthumb:"+e.id]?'<img src="'+mediaCache["expthumb:"+e.id]+'" alt="">':'<span class="ph">🧑‍💼</span>';
       var pc=e.photoCount||0;var badge=pc>0?'<span class="exp-badge">'+pc+(pc>1?" fotos":" foto")+'</span>':"";
-      return '<div class="tile"><div class="media">'+thumb+badge+'</div><div class="body"><h3>'+esc(e.name||"(sem nome)")+'</h3>'+
+      return '<div class="tile"><div class="exp-media">'+thumb+badge+'</div><div class="body"><h3>'+esc(e.name||"(sem nome)")+'</h3>'+
         '<p style="color:var(--muted)">'+(pc>0?pc+(pc>1?" variações":" variação"):"sem fotos ainda")+'</p>'+
-        '<div class="acts"><button class="btn sm" data-editexp="'+e.id+'">Abrir</button></div></div></div>';
+        '<div class="acts"><button class="btn primary sm" data-varexp="'+e.id+'"><span class="ic">✨</span> Criar variação</button><button class="btn sm" data-editexp="'+e.id+'">Abrir</button></div></div></div>';
     }).join("");
     g.querySelectorAll("[data-editexp]").forEach(function(b){b.addEventListener("click",function(){openExpert(b.getAttribute("data-editexp"));});});
+    g.querySelectorAll("[data-varexp]").forEach(function(b){b.addEventListener("click",function(){openVariation(b.getAttribute("data-varexp"));});});
   }
   function copyText(t){if(!t||!t.trim()){toast("Está vazio — nada pra copiar.");return;}
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(function(){toast("Comando copiado ✓");},function(){toast("Não deu pra copiar automático.");});
@@ -901,6 +916,39 @@
     if(currentExpId===id)loadExpertPhotos(id);render();}
   function closeExpertModal(){currentExpId=null;var m=$("#expModal");m.classList.remove("open");m.setAttribute("aria-hidden","true");if(!$("#drawer").classList.contains("open"))$("#scrim").classList.remove("open");}
 
+  /* ---------- criar variação (foto + prompt -> ChatGPT) ---------- */
+  function dataURItoPngBlob(dataURI){return new Promise(function(res){try{var img=new Image();img.onload=function(){try{var cv=document.createElement("canvas");cv.width=img.naturalWidth;cv.height=img.naturalHeight;cv.getContext("2d").drawImage(img,0,0);cv.toBlob(function(b){res(b);},"image/png");}catch(e){res(null);}};img.onerror=function(){res(null);};img.src=dataURI;}catch(e){res(null);}});}
+  function openVariation(id){var e=experts[id];if(!e)return;currentVarId=id;window._varPhoto=null;window._varBlob=null;
+    $("#varTitle").textContent="Criar variação — "+(e.name||"expert");
+    var cmds=commandList();var body=$("#varBody");
+    if(!cmds.length){body.innerHTML='<p style="color:var(--muted);font-size:13.5px">Você ainda não tem nenhum <strong>comando/prompt</strong> salvo. Crie um lá em cima em “⧉ Comandos / prompts” e volte aqui pra criar a variação. 🙂</p>';}
+    else{
+      body.innerHTML='<div class="field"><label>Foto do expert</label><div class="var-photos" id="varPhotos"><span style="font-size:12px;color:var(--faint)">carregando…</span></div></div>'+
+        '<div class="field"><label>Escolha o comando pra gerar a variação</label><div class="var-cmds" id="varCmds">'+
+          cmds.map(function(c){return '<button class="btn var-cmd" data-vcmd="'+c.id+'"><span class="ic">▶</span> '+esc(c.name||"(sem nome)")+'</button>';}).join("")+
+        '</div></div>'+
+        '<p style="font-size:12px;color:var(--muted);margin:6px 0 0;line-height:1.5">Ao escolher, eu <strong>copio a foto</strong> e abro o ChatGPT já com o prompt. Lá, cole a foto com <strong>Cmd/Ctrl + V</strong> e envie. <br><span style="color:var(--faint)">(O ChatGPT não deixa anexar imagem por link, por isso vai colada da área de transferência.)</span></p>';
+      loadVarPhotos(id);
+      $("#varCmds").querySelectorAll("[data-vcmd]").forEach(function(b){b.addEventListener("click",function(){doVariation(commands[b.getAttribute("data-vcmd")]);});});
+    }
+    $("#scrim").classList.add("open");var m=$("#varModal");m.classList.add("open");m.setAttribute("aria-hidden","false");}
+  function loadVarPhotos(id){var slot=$("#varPhotos");if(!slot)return;
+    db.collection("experts/"+id+"/photos").get().then(function(snap){if(currentVarId!==id)return;
+      var ps=[];snap.forEach(function(d){var v=d.data();v.id=d.id;ps.push(v);});ps.sort(function(a,b){return (a.order||0)-(b.order||0);});
+      if(!ps.length){slot.innerHTML='<span style="font-size:12.5px;color:var(--faint)">Este expert não tem foto. Adicione em “Abrir”.</span>';return;}
+      function pick(data){window._varPhoto=data;window._varBlob=null;dataURItoPngBlob(data).then(function(b){window._varBlob=b;});}
+      pick(ps[0].data);
+      slot.innerHTML=ps.map(function(p,i){return '<button class="var-photo'+(i===0?" sel":"")+'" data-vphoto="'+p.id+'"><img src="'+p.data+'" alt=""></button>';}).join("");
+      slot.querySelectorAll("[data-vphoto]").forEach(function(b){b.addEventListener("click",function(){slot.querySelectorAll(".var-photo").forEach(function(x){x.classList.remove("sel");});b.classList.add("sel");var f=ps.find(function(x){return x.id===b.getAttribute("data-vphoto");});if(f)pick(f.data);});});
+    }).catch(function(){slot.innerHTML='<span style="color:var(--danger);font-size:12.5px">Erro ao carregar fotos.</span>';});}
+  function doVariation(cmd){if(!cmd||!cmd.text||!cmd.text.trim()){toast("Esse comando está vazio — escreva o prompt primeiro.");return;}
+    var copied=false;
+    try{if(window._varBlob&&navigator.clipboard&&window.ClipboardItem){navigator.clipboard.write([new ClipboardItem({"image/png":window._varBlob})]);copied=true;}}catch(e){copied=false;}
+    window.open("https://chatgpt.com/?q="+encodeURIComponent(cmd.text),"_blank","noopener");
+    toast(copied?"Foto copiada ✓ — no ChatGPT cole (Cmd/Ctrl+V) e envie":"ChatGPT aberto. Anexe a foto manualmente (baixe em “Abrir”).");
+    closeVariation();}
+  function closeVariation(){currentVarId=null;var m=$("#varModal");m.classList.remove("open");m.setAttribute("aria-hidden","true");if(!$("#drawer").classList.contains("open")&&!$("#expModal").classList.contains("open"))$("#scrim").classList.remove("open");}
+
   /* ---------- views + static ---------- */
   function switchView(v){view=v;if($("#drawer").classList.contains("open"))closeDrawer();
     document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("active",t.getAttribute("data-view")===v);});
@@ -931,8 +979,9 @@
   $("#cfmNo").addEventListener("click",closeConfirm);
   $("#cfm").addEventListener("click",function(e){if(e.target===$("#cfm"))closeConfirm();});
   $("#cfmYes").addEventListener("click",function(){var fn=window._cfmYes;closeConfirm();if(typeof fn==="function")fn();});
-  $("#scrim").addEventListener("click",function(){if($("#expModal").classList.contains("open"))closeExpertModal();else if($("#fmtModal").classList.contains("open"))closeFormatModal();else closeDrawer();});
-  document.addEventListener("keydown",function(e){if(e.key==="Escape"){if($("#cfm").classList.contains("open"))closeConfirm();else if($("#vmodal").classList.contains("open"))closeVideo();else if($("#expModal").classList.contains("open"))closeExpertModal();else if($("#fmtModal").classList.contains("open"))closeFormatModal();else if(currentId)closeDrawer();}});
+  $("#varClose").addEventListener("click",closeVariation);
+  $("#scrim").addEventListener("click",function(){if($("#varModal").classList.contains("open"))closeVariation();else if($("#expModal").classList.contains("open"))closeExpertModal();else if($("#fmtModal").classList.contains("open"))closeFormatModal();else closeDrawer();});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"){if($("#cfm").classList.contains("open"))closeConfirm();else if($("#vmodal").classList.contains("open"))closeVideo();else if($("#varModal").classList.contains("open"))closeVariation();else if($("#expModal").classList.contains("open"))closeExpertModal();else if($("#fmtModal").classList.contains("open"))closeFormatModal();else if(currentId)closeDrawer();}});
   $("#shareBtn").addEventListener("click",function(){var url=location.href;if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(function(){toast("Link copiado — envie pro seu editor 📨");},function(){toast(url);});else toast(url);});
 
   /* ---------- boot ---------- */

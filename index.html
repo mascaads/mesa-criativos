@@ -186,7 +186,7 @@
 
   .scrim{position:fixed;inset:0;background:rgba(15,20,28,.5);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .2s;z-index:40}
   .scrim.open{opacity:1;pointer-events:auto}
-  .drawer{position:fixed;top:0;right:0;height:100%;width:min(480px,100%);background:var(--surface);box-shadow:var(--shadow-lg);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);z-index:41;display:flex;flex-direction:column}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(720px,100%);background:var(--surface);box-shadow:var(--shadow-lg);transform:translateX(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);z-index:41;display:flex;flex-direction:column}
   .drawer.open{transform:none}
   .drawer-head{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line);flex-shrink:0}
   .status-pick{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted)}
@@ -419,6 +419,11 @@
   .var-photo img{width:100%;height:100%;object-fit:cover;display:block}
   .var-cmds{display:flex;flex-direction:column;gap:8px}
   .var-cmd{text-align:left;justify-content:flex-start;width:100%}
+  .country-pills{display:flex;flex-wrap:wrap;gap:7px}
+  .cpill{border:1px solid var(--line-strong);background:var(--surface);color:var(--muted);font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:999px;cursor:pointer}
+  .cpill:hover{background:var(--surface-2)}
+  .cpill.on{background:var(--accent-soft);border-color:transparent;color:var(--accent-ink)}
+  .asset.copy.on{background:var(--c-review-soft);color:var(--c-review)}
 </style>
 
 <datalist id="fmtNames"></datalist>
@@ -444,6 +449,8 @@
     {id:"approved",label:"Aprovado",cc:"var(--c-approved)"}
   ];
   var COLMAP={};COLUMNS.forEach(function(c){COLMAP[c.id]=c;});
+  var COUNTRIES=[{id:"BR",fl:"🇧🇷",n:"Brasil"},{id:"MX",fl:"🇲🇽",n:"México"},{id:"CO",fl:"🇨🇴",n:"Colômbia"},{id:"AR",fl:"🇦🇷",n:"Argentina"},{id:"BO",fl:"🇧🇴",n:"Bolívia"}];
+  var CMAP={};COUNTRIES.forEach(function(c){CMAP[c.id]=c;});
   var CHUNK=700000, BATCH=6;
   var AUDIO_MAX=22*1024*1024, VIDEO_MAX=30*1024*1024, IMG_TARGET=150000, MEDIA_MAX=235000;
   var DL_OK=/\.(gif|png|jpg|jpeg|webp|mp4|webm|txt|json|md|docx|pptx|epub|csv|ttf|html|svg|pdf|xlsx)$/i;
@@ -496,7 +503,8 @@
   function cardHTML(c){
     var col=COLMAP[c.status]||COLUMNS[0];
     var thumb=(c.hasImg&&mediaCache[c.id+":refImage"])?'<img class="thumb" src="'+mediaCache[c.id+":refImage"]+'" alt="">':"";
-    var chips=(c.format?chip(true,"◆",esc(c.format),"fmt"):"")+chip(hasAudioAny(c),"🎧","Áudio")+chip(c.hasImg,"🖼","Imagem")+chip(hasDeliverAny(c),"🎬","Entrega","deliver");
+    var country=(c.copyCountry&&CMAP[c.copyCountry])?('<span class="asset on">'+CMAP[c.copyCountry].fl+' '+CMAP[c.copyCountry].n+'</span>'):"";
+    var chips=country+(c.format?chip(true,"◆",esc(c.format),"fmt"):"")+chip(hasAudioAny(c),"🎧","Áudio")+chip(!!(c.copy&&c.copy.trim()),"📝","Copy","copy")+chip(c.hasImg,"🖼","Imagem")+chip(hasDeliverAny(c),"🎬","Entrega","deliver");
     var brief=c.brief?'<p class="brief">'+esc(c.brief)+'</p>':"";
     var arch=(c.status==="approved")?'<button class="card-arch" draggable="false" data-arch="'+c.id+'">✓ Mover para Feitos</button>':"";
     var meta='<div class="card-meta">'+deadlineChip(c.deadline)+'<span class="card-date">criado '+fmtDate(c.createdAt)+'</span></div>';
@@ -612,7 +620,7 @@
   function createCard(status){
     if(!cardsCol){toast("Sem conexão — abra pelo link publicado e logado (o indicador precisa estar verde 'ao vivo').");return;}
     var id=uid(),t=now(),mx=0;for(var k in cards){if(!cards[k].archived&&cards[k].status===status&&(cards[k].order||0)>mx)mx=cards[k].order;}
-    var data={id:id,title:"",brief:"",format:"",deadline:todayStr(),status:status,order:mx+1000,archived:false,audioLink:"",deliveryLink:"",deliveryNote:"",hasAudio:false,hasImg:false,hasDeliver:false,hasDelivVid:false,createdAt:t,updatedAt:t};
+    var data={id:id,title:"",brief:"",format:"",copy:"",copyCountry:"",deadline:todayStr(),status:status,order:mx+1000,archived:false,audioLink:"",deliveryLink:"",deliveryNote:"",hasAudio:false,hasImg:false,hasDeliver:false,hasDelivVid:false,createdAt:t,updatedAt:t};
     cards[id]=data;render();openDrawer(id);setTimeout(function(){var ti=$("#f_title");if(ti)ti.focus();},330);
     cardsCol.doc(id).set(data).catch(function(e){toast("Erro ao criar: "+(e&&e.code||"?")+" — recarregue a página.");});
   }
@@ -685,6 +693,10 @@
       '<div class="field"><label>◆ Formato</label><input id="f_format" class="in" list="fmtNames" placeholder="Ex: UGC depoimento, Reels dança, VSL…" value="'+esc(c.format||"")+'"></div>'+
       '<div class="field"><label>📅 Prazo de entrega</label><input type="date" id="f_deadline" class="in" style="color-scheme:light dark;max-width:220px" value="'+esc(c.deadline||todayStr())+'"></div>'+
       '<div class="field"><label>Descrição / briefing — como você quer o criativo</label><textarea id="f_brief" class="in" placeholder="Ex: formato depoimento, abrir com a cena do consultório, legenda grande, cortes rápidos nos 3s iniciais…">'+esc(c.brief)+'</textarea></div>'+
+      '<div class="field"><label>📝 Copy</label><textarea id="f_copy" class="in" placeholder="Cole aqui a copy (texto do criativo)…" style="min-height:130px">'+esc(c.copy||"")+'</textarea>'+
+        '<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap"><button class="btn sm" id="copyTranslate"><span class="ic">🌎</span> Traduzir com IA</button><button class="btn sm" id="copyCopyBtn"><span class="ic">⧉</span> Copiar copy</button></div></div>'+
+      '<div class="field"><label>🌎 País da copy (marca pro editor)</label><div class="country-pills" id="f_country">'+
+        COUNTRIES.map(function(k){return '<button class="cpill'+(c.copyCountry===k.id?" on":"")+'" data-country="'+k.id+'">'+k.fl+' '+k.n+'</button>';}).join("")+'</div></div>'+
       '<div class="field"><label>🎧 Áudio de referência</label><div id="audioSlot"></div>'+
         '<label class="drop" id="audioDrop"><span class="big">🎙️</span><span class="t">Anexar áudio</span><span class="s">até ~22 MB — o editor ouve aqui no app</span><input type="file" accept="audio/*" id="f_audio" class="sr-only"></label>'+
         '<div class="or">e / ou</div><input id="f_audioLink" class="in" placeholder="Link pro editor BAIXAR (Drive, Dropbox…)" value="'+esc(c.audioLink)+'"><div id="audioLinkPlay"></div></div>'+
@@ -706,6 +718,10 @@
     $("#f_format").addEventListener("input",function(){debPatch("format",this.value,true);});
     $("#f_deadline").addEventListener("change",function(){patch(id,{deadline:this.value});render();});
     $("#f_brief").addEventListener("input",function(){debPatch("brief",this.value,true);});
+    $("#f_copy").addEventListener("input",function(){debPatch("copy",this.value,true);});
+    $("#copyCopyBtn").addEventListener("click",function(){copyText($("#f_copy").value);});
+    $("#copyTranslate").addEventListener("click",function(){translateCopy(id);});
+    $("#f_country").querySelectorAll("[data-country]").forEach(function(b){b.addEventListener("click",function(){var cc=b.getAttribute("data-country");if(cards[id].copyCountry===cc)cc="";patch(id,{copyCountry:cc});$("#f_country").querySelectorAll(".cpill").forEach(function(x){x.classList.toggle("on",x.getAttribute("data-country")===cc);});render();});});
     $("#f_audioLink").addEventListener("input",function(){var v=this.value;clearTimeout(deb);deb=setTimeout(function(){patch(id,{audioLink:v});render();renderLinkPlay($("#audioLinkPlay"),v,false);},450);});
     $("#f_delNote").addEventListener("input",function(){debPatch("deliveryNote",this.value);});
     $("#f_delLink").addEventListener("input",function(){var v=this.value;clearTimeout(deb);deb=setTimeout(function(){patch(id,{deliveryLink:v});render();renderLinkPlay($("#delLinkPlay"),v,true);},450);});
@@ -836,8 +852,14 @@
     g.querySelectorAll("[data-varexp]").forEach(function(b){b.addEventListener("click",function(){openVariation(b.getAttribute("data-varexp"));});});
   }
   function copyText(t){if(!t||!t.trim()){toast("Está vazio — nada pra copiar.");return;}
-    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(function(){toast("Comando copiado ✓");},function(){toast("Não deu pra copiar automático.");});
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(function(){toast("Copiado ✓");},function(){toast("Não deu pra copiar automático.");});
     else toast("Não deu pra copiar automático.");}
+  function translateCopy(id){var c=cards[id];if(!c||!(c.copy||"").trim()){toast("Escreva ou cole a copy primeiro.");return;}
+    var country=c.copyCountry&&CMAP[c.copyCountry]?CMAP[c.copyCountry].n:"";
+    var pre=country?("Esta é uma copy de anúncio do seguinte país: "+country+". "):"Primeiro identifique de qual país de língua espanhola é esta copy (México, Colômbia, Argentina, Bolívia, etc.). ";
+    var prompt=pre+"Traduza para o português do Brasil de forma natural, fiel e mantendo o tom de anúncio/vendas. Explique as gírias, expressões locais e referências do cotidiano daquele país quando houver, pra eu entender o contexto. Segue a copy:\n\n"+c.copy;
+    window.open("https://chatgpt.com/?q="+encodeURIComponent(prompt),"_blank","noopener");
+    toast("Abri o ChatGPT com a tradução 🌎");}
 
   /* ---------- comandos / prompts (área própria dos Experts) ---------- */
   function commandList(){var a=[];for(var k in commands)a.push(commands[k]);a.sort(function(x,y){return (x.order||0)-(y.order||0);});return a;}
